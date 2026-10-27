@@ -1,0 +1,61 @@
+# push 到 main 自动测试、构建，并把 dist 发布到部署服务器
+#
+# 服务器目录结构：
+#   $DEPLOY_PATH/releases/<commit-sha>/   每次发布一个独立目录
+#   $DEPLOY_PATH/current -> releases/<sha> nginx 的 root 指向这里，切换只改软链，可秒级回滚
+#
+# 需要在仓库 Settings → Secrets and variables → Actions 配置：
+#   DEPLOY_HOST         服务器地址
+#   DEPLOY_USER         登录用户（建议专用 deploy 用户，对 DEPLOY_PATH 有写权限即可）
+#   DEPLOY_PATH         如 /var/www/md2wechat
+#   DEPLOY_SSH_KEY      该用户的私钥（专用 deploy key，不要用个人私钥）
+#   DEPLOY_KNOWN_HOSTS  ssh-keyscan -t ed25519 <服务器地址> 的输出，防中间人
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      - name: 配置 SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: 上传并切换版本
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          BASE: ${{ secrets.DEPLOY_PATH }}
+          SHA: ${{ github.sha }}
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy"
+          REL="$BASE/releases/$SHA"
+          $SSH "$USER@$HOST" "mkdir -p '$REL'"
+          rsync -az --delete -e "$SSH" dist/ "$USER@$HOST:$REL/"
+          # 新版本文件齐全才切软链；只保留最近 5 个版本
+          $SSH "$USER@$HOST" "set -e
+            test -s '$REL/index.html'
+            ln -sfn '$REL' '$BASE/current.tmp' && mv -T '$BASE/current.tmp' '$BASE/current'
+            cd '$BASE/releases' && ls -1t | tail -n +6 | xargs -r rm -rf"
