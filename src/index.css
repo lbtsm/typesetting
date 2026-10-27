@@ -1,0 +1,27 @@
+@import 'tailwindcss';
+
+/* Tailwind v4 默认按系统偏好切换暗色，这里改成由 <html class="dark"> 控制 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 预览区的正文全部走 inline style，这里只处理滚动条观感 */
+.cm-editor {
+  height: 100%;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
