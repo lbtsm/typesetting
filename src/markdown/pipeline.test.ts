@@ -69,7 +69,7 @@ beforeAll(async () => {
 describe('渲染管线', () => {
   it('根节点是带完整正文样式的 section', () => {
     expect(html.startsWith('<section style="')).toBe(true)
-    expect(html).toContain('font-family: system-ui')
+    expect(html).toContain('font-family: &#x22;mp-quote&#x22;, &#x22;PingFang SC&#x22;, system-ui')
     expect(html).toContain('font-size: 17px')
     expect(html).toContain('line-height: 1.8')
     expect(html).toContain('color: rgba(0, 0, 0, 0.9)')
@@ -109,7 +109,7 @@ describe('渲染管线', () => {
   })
 
   it('代码块是 pre > code 结构、带横向滚动外壳与高亮', () => {
-    expect(html).toMatch(/<section style="[^"]*"><pre style="[^"]*"><code style="[^"]*">/)
+    expect(html).toMatch(/<section data-ignore-width="" style="[^"]*"><pre style="[^"]*"><code style="[^"]*">/)
     expect(html).toContain('overflow-x: auto')
     expect(html).toContain('white-space: pre')
     // shiki 的 token 颜色是内联的
@@ -369,6 +369,53 @@ describe('GFM 扩展', () => {
  *
  * 所以要求：两种围栏产出的结构必须一致，且代码块里不允许出现无属性标签。
  */
+/**
+ * 回归：粘进微信后整段代码变成一行。
+ *
+ * 旧写法每行是 display:inline 的 span，行与行之间靠裸 `\n` 字符 + white-space:pre 换行；
+ * 微信编辑器现在粘贴时把裸 `\n` 折叠成空格。原生代码块的结构是
+ * `<pre><code>行1</code><code>行2</code></pre>`，每行一个块级 code，空行 `<code><br></code>`，
+ * 完全不依赖换行字符。照搬这个结构。
+ */
+describe('代码块按行输出块级 code', () => {
+  const md = '```\n第一行\n    │ 缩进行\n\n最后一行\n```'
+  const preInner = (html: string) => /<pre[^>]*>([\s\S]*?)<\/pre>/.exec(html)?.[1] ?? ''
+
+  for (const [label, src] of [
+    ['无语言', md],
+    ['go', md.replace('```\n', '```go\n')],
+  ] as const) {
+    it(`${label}：pre 内部不含任何换行字符`, () => {
+      expect(preInner(renderMarkdown(src, options()).html)).not.toContain('\n')
+    })
+
+    it(`${label}：每个源码行对应一个块级 code`, () => {
+      const inner = preInner(renderMarkdown(src, options()).html)
+      const lines = inner.match(/<code style="[^"]*display: block[^"]*">/g) ?? []
+      expect(lines).toHaveLength(4)
+      expect(inner).toContain('    │ 缩进行')
+    })
+
+    it(`${label}：空行用 br 占位`, () => {
+      const inner = preInner(renderMarkdown(src, options()).html)
+      expect(inner).toMatch(/<code style="[^"]*"><br><\/code>/)
+    })
+  }
+
+  it('滚动容器带 data-ignore-width，且不用 max-content', () => {
+    const { html: out } = renderMarkdown(md, options())
+    expect(out).toMatch(/<section data-ignore-width="" style="[^"]*overflow-x: auto/)
+    expect(out).not.toContain('max-content')
+  })
+
+  it('表格仅在滚动容器上豁免宽度检测，不影响正文', () => {
+    const { html: out } = renderMarkdown('正文\n\n| TTL | 说明 |\n| --- | --- |\n| 60s | 缓存 |', options())
+    expect(out).toMatch(/<section data-ignore-width="" style="[^"]*overflow-x: auto[^"]*"><table/)
+    expect(out).toMatch(/^<section style=/)
+    expect(out.match(/data-ignore-width/g)).toHaveLength(1)
+  })
+})
+
 describe('代码块结构一致性', () => {
   const ART = '  已收到      空闲\n\n ┌────┬────┐\n │ ██ │    │\n └────┴────┘'
 
@@ -403,7 +450,7 @@ describe('代码块结构一致性', () => {
    *   .rich_media_content * { max-width:100%!important; word-wrap:break-word!important }
    * 它会把超宽的代码行压回正文宽度再强行断开，ASCII 图就此错行。
    * 行内 !important 优先级高于样式表 !important，用它顶回去；
-   * 再给 code 一个 max-content 宽度，pre 的横向滚动范围才覆盖得到最长那行。
+   * 不再强制 max-content 宽度；超宽文本由 pre 自身的滚动承接（规范 §1.8）。
    */
   it('代码块顶得住微信强制的 max-width 与 word-wrap', () => {
     const wide = '```\n' + '─'.repeat(120) + '\n```'
@@ -413,28 +460,30 @@ describe('代码块结构一致性', () => {
     expect(out).toContain('word-wrap: normal !important')
     expect(out).toContain('word-break: normal !important')
     expect(out).toContain('white-space: pre !important')
-    // 横向滚动的三件套
-    expect(out).toContain('width: max-content')
-    expect(out).toContain('overflow-x: auto')
+    expect(out).not.toContain('width: max-content')
+    // 不能只有外层 section 滚动：规范 §1.8 检查 pre 的计算样式。
+    expect(out).toMatch(/<pre style="[^"]*overflow-x: auto/)
     expect(out).toContain('-webkit-overflow-scrolling: touch')
   })
 
   it('带语言的代码块享受同样的保护', () => {
     const { html: out } = renderMarkdown('```go\nfunc main() {}\n```', options())
     expect(out).toContain('max-width: none !important')
-    expect(out).toContain('width: max-content')
+    expect(out).not.toContain('width: max-content')
+    expect(out).toMatch(/<pre style="[^"]*overflow-x: auto/)
   })
 
   it('无语言与带语言产出的行结构完全一致', () => {
     // 用正则匹配行容器，避免测试被 codeLine 的样式微调绊倒
-    const lineOpen = /<span style="display: inline[^"]*">/g
-    const emptyLine = /<span style="display: inline[^"]*"><\/span>/
+    const lineOpen = /<code style="[^"]*display: block[^"]*">/g
+    const emptyLine = /<code style="[^"]*"><br><\/code>/
 
     const plain = renderMarkdown(fences['无语言'], options()).html
     const go = renderMarkdown(fences['go'], options()).html
 
-    expect(plain.match(lineOpen)?.length).toBe(go.match(lineOpen)?.length)
-    // 空行在两种情况下都是「空的行容器」，不带多余的内层标签
+    expect(plain.match(lineOpen)).toHaveLength(5)
+    expect(go.match(lineOpen)).toHaveLength(5)
+    // 两条路径都以 br 撑开空行，不依赖可能被清洗的换行字符。
     expect(plain).toMatch(emptyLine)
     expect(go).toMatch(emptyLine)
   })

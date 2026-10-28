@@ -86,7 +86,6 @@ export const ELEMENT_KEYS = [
   'figcaption',
   'preWrap',
   'pre',
-  'code',
   'codeLine',
   'tableWrap',
   'table',

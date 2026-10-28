@@ -12,7 +12,7 @@ import { WECHAT_FONT_FAMILY } from './tokens'
  *   小标题 font-size:20px; font-weight:500; color:#2B77BF; text-align:center
  *   加粗   font-weight:500
  *   图注   color:rgb(136,136,136)
- *   字体   .wx-root 的字体栈
+ *   字体   按微信文章结构规范 §3 更新默认顺序
  *   正文没有设 letter-spacing
  *
  * 这组值是用户明确要求「保持一致」的硬指标，所以单独立一个测试锁住，
@@ -23,6 +23,11 @@ describe('公众号原味主题', () => {
 
   it('字体栈与公众号阅读页一致', () => {
     expect(theme.base.fontFamily).toBe(WECHAT_FONT_FAMILY)
+    // 微信结构规范 §3：中文字体优先，避免 iOS 映射到另一版系统字体。
+    expect(theme.base.fontFamily).toBe(
+      '"mp-quote", "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, ' +
+      '"Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif',
+    )
     expect(theme.base.fontFamily).toContain('PingFang SC')
     expect(theme.base.fontFamily).toContain('Microsoft YaHei')
     expect(theme.base.fontFamily).toContain('Hiragino Sans GB')
@@ -55,8 +60,8 @@ describe('公众号原味主题', () => {
   })
 
   /**
-   * 微信深色模式会中和块级元素的背景，但不碰行内元素上显式设置的背景，
-   * 浅色底会原样留在深色正文里变成白斑。参考文章整篇正文的背景色用量是 0。
+   * 回归用户手机深色模式下的行内代码白底：默认主题不添加背景。
+   * 这是本工具的排版策略，不代表微信深色模式不处理行内背景。
    */
   it('行内代码不带背景色，只靠等宽字体 + 强调色区分', () => {
     expect(theme.styles.inlineCode.background).toBeUndefined()

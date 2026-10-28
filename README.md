@@ -1,6 +1,6 @@
 # md2wechat
 
-本地运行的 Markdown → 微信公众号排版工具。左边写 Markdown，右边实时看到公众号里的最终效果，
+本地运行的 Markdown → 微信公众号排版工具。左边写 Markdown，右边实时预览文章排版，
 点一下「复制富文本」，到公众号后台「新建图文」直接粘贴。
 
 **不需要登录，不连服务器，文章内容只存在你自己的浏览器里。**
@@ -28,8 +28,9 @@ npm run typecheck  # TypeScript strict 检查
 ### 1. 预览和复制是同一份 HTML
 
 常见做法是「预览用 CSS 渲染，导出时再把 CSS 内联」，这会导致预览好看、粘贴到微信就走样。
-这里的做法是：**主题样式在 AST 阶段就逐节点写进 `style` 属性**，预览区和剪贴板拿到的
-是同一个字符串，没有第二条渲染路径，也就不存在两者对不上的可能。
+这里的做法是：**主题样式在 AST 阶段就逐节点写进 `style` 属性**，预览区和剪贴板的 HTML
+来自同一条渲染管线。微信仍可能在粘贴、保存和手机阅读时清洗 HTML 或调整深色模式颜色，
+因此本地预览不能保证与所有终端完全一致。
 
 ```
 Markdown → mdast → hast → 结构改写（链接/图片/列表/表格/代码）
@@ -58,7 +59,7 @@ Markdown → mdast → hast → 结构改写（链接/图片/列表/表格/代�
 
 ### 3. 链接：微信的限制与应对
 
-微信会把**非白名单域名**的 `<a href>` 剥成纯文本——这是平台规则，没有工具能绕开。
+微信可能限制外部链接，生成带 href 的 HTML 并不意味着发布后一定可点击。
 所以提供四种策略（设置面板可切换）：
 
 | 模式 | 行为 |
@@ -68,62 +69,35 @@ Markdown → mdast → hast → 结构改写（链接/图片/列表/表格/代�
 | `inline` | 只保留 `<a href>`，不生成脚注 |
 | `text` | 只保留文字 |
 
-`mp.weixin.qq.com` 的链接粘贴后仍然可点，因此永远按原样保留、不进脚注。
+`mp.weixin.qq.com` 的链接在本工具中按原样保留、不进脚注；最终能否点击仍取决于微信端处理。
 
 ### 4. 代码块
 
-用 [shiki](https://shiki.style/) 高亮，它输出的 token 颜色本身就是 `<span style="color:#xxx">`，
-天然满足微信的要求。代码块结构：
+用 [shiki](https://shiki.style/) 高亮，token 颜色直接写在内联样式里。
+每个源码行输出一个块级 `<code>`，空行用 `<br>` 占位：
 
 ```html
-<section style="overflow-x: auto; ..."><pre style="..."><code style="white-space: pre; ...">…</code></pre></section>
+<section data-ignore-width style="overflow-x: auto; ...">
+  <pre style="overflow-x: auto; ..."><code style="display: block; white-space: pre; ...">第一行</code><code style="display: block; white-space: pre; ..."><br></code><code style="display: block; white-space: pre; ...">第三行</code></pre>
+</section>
 ```
 
-外层 `section` 负责横向滚动（微信对 `section` 上的 `overflow` 支持比 `pre` 稳），
-Tab 统一展开成 4 个空格以保证缩进不受微信字体影响。
+实际生成时，`pre` 内各 `code` 之间没有裸换行字符，避免粘贴清洗把源码行拼在一起。
+无语言、未知语言和高亮器未就绪时也使用相同的逐行结构；文本 token 带显式颜色，
+Tab 统一展开成 4 个空格。代码字体继续使用等宽字体。
 
-**一条必须守住的不变量：代码块里不允许出现没有任何属性的标签。**
+按照微信文章结构规范 §1.8，`pre` **自身**提供 `overflow-x: auto`，
+避免只有外层滚动而代码被截断。超长行不强制 `width: max-content`。
+保留行内 `!important` 作为抵抗阅读页样式覆盖的措施，但不能假定粘贴清洗一定保留它。
 
-shiki 对 plaintext 不上色，原始产物是 `<span>` 这种裸标签；而带语言时每段文本都是
-`<span style="color:#xxx">`。微信粘贴时会清掉无样式的行内标签，连带把 ASCII 图
-依赖的连续空格一起折叠——表现就是「写了 ```go 正常，不写语言的围栏在手机上错乱」。
+`data-ignore-width` 按规范 §1.4.4 只标在代码块、表格等有意提供横向滚动的容器上，
+它只豁免宽度校验，**不会解除 CSS 的 max-width 限制，也不会自动开启滚动**。
 
-所以 `normalizeCodeContent()` 会把无语言的产物拉成和带语言完全一样的形状：
-有内容的裸 span 补上主题前景色，空行的裸 span 直接删掉。高亮器没就绪时的兜底路径
-也手工拼出同一个结构。`src/markdown/pipeline.test.ts` 的「代码块结构一致性」锁住了这点。
+### 5. 行内代码与深色模式
 
-**另一条不变量：代码块的 `max-width` / `word-wrap` / `white-space` 必须带 `!important`。**
-
-微信正文样式表里有一条针对所有元素的强制规则：
-
-```css
-.rich_media_content * {
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-  word-wrap: break-word !important;
-}
-```
-
-超宽的代码行会被压回正文列宽，再按 `break-word` 强行断开——宽 ASCII 图就此错行。
-微信给自己的代码块开了豁免（`.code-snippet__fix * { max-width: 1000% !important }`），
-我们没有那个 class，只能靠**行内 `!important`**：CSS 层叠里 style 属性上的 `!important`
-优先级高于样式表里的 `!important`，正好把这两条顶回去。顶回去之后再给 `<code>`
-一个 `width: max-content`，`<pre>` 的横向滚动范围才覆盖得到最长那一行。
-
-> 如果某天微信的粘贴清洗器开始剥掉行内 `!important`，备用方案是改成输出微信原生的
-> `<section class="code-snippet__fix">` + 每行一个 `<code>` 的结构，直接吃它自己的
-> 豁免规则；代价是行号栏强制出现，且预览端要自带一份同样的 CSS。
-
-### 5. 行内代码不给背景色
-
-微信的深色模式会中和**块级**元素（`pre`、表格单元格）上的背景，但**不会**处理
-**行内**元素上显式设置的背景——浅色底会原样留在深色正文里，变成一块刺眼的白斑。
-
-所以行内代码只靠等宽字体 + 强调色区分，不加 `background` / `padding` / `border-radius`。
-参考的公众号线上文章整篇正文的背景色用量就是 0，这也是微信原生的做法。
-
-主题里确实需要底色时用半透明值（如 `rgba(0,0,0,0.06)`），它在深色模式下只是淡淡一层，
-不会糊成白块。
+默认主题的行内代码只靠等宽字体和强调色区分，不加背景、内边距或圆角，
+避免此前手机深色模式下观察到的白底。其他主题保留各自的配色。
+微信会依据内容结构和颜色对比度处理深色模式，不能概括为“只处理块级、不处理行内”。
 
 ### 6. 表格：表头无底色，单元格不在任意字符处断开
 
@@ -156,6 +130,20 @@ Markdown 的 `---` / `****` / `___` 写作时用来断章很顺手，但放进�
 ```
 
 会渲染成 `<h2>这是标题</h2>`，不受这个开关影响。
+
+## 微信兼容依据
+
+最近核对日期：2026-10-28。依据微信发布的
+[文章结构规范](https://github.com/wechatjs/verify-article-structure-spec/blob/main/verify_article_structure.md)。
+当前对齐的规则包括 §1.4.4（滚动容器的宽度校验豁免）、§1.8（pre 自身横向滚动）、
+§3（字体顺序）、§4（深色模式依据结构与对比度调整颜色）。
+
+正文默认字体顺序为 `"mp-quote", "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif`。
+规范建议尽量继承平台字体；本工具为本地预览保留显式声明，使用该默认顺序。
+17px 正文、蓝色标题和字重 500 来自用户参考文章，属于主题选择，并非平台强制要求。
+
+自动化测试覆盖 HTML 结构、源码行/空行、转义、字体顺序、无底色表头和宽度标记。
+它们不能替代公众号后台粘贴、保存和微信手机端阅读的实际检查。
 
 ## 功能
 

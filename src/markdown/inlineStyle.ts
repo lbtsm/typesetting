@@ -9,7 +9,7 @@ import { ELEMENT_KEYS, type ElementKey, type StyleMap, type Theme } from '../typ
  * 这是整条管线里最关键的一步，原因很直接：**微信公众号编辑器会丢弃 class 和
  * 外部样式表**，只认元素自己的 style 属性。所以我们不在运行时用 CSS 渲染预览、
  * 再想办法「导出时内联」，而是一开始就只产出内联样式——
- * 预览和复制用的是同一份 HTML 字符串，不存在两者对不上的可能。
+ * 预览和复制共享渲染管线；微信自己的清洗和深色模式转换仍可能改变最终呈现。
  */
 
 /** 标签名 → 主题槽位的默认映射 */
@@ -42,7 +42,7 @@ const TAG_TO_SLOT: Readonly<Record<string, ElementKey>> = {
   th: 'th',
   td: 'td',
   pre: 'pre',
-  // 裸 <code> 一定是行内代码；代码块里的 code 由转换器显式标了 data-sk="code"
+  // 裸 <code> 是行内代码；代码块的每行由转换器显式标为 codeLine。
   code: 'inlineCode',
   sup: 'sup',
 }

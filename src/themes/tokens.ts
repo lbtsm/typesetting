@@ -1,12 +1,12 @@
 import type { StyleMap, ThemeBase } from '../types/theme'
 
 /**
- * 微信公众号文章正文实际使用的字体栈。
- * 抓自 mp.weixin.qq.com 线上文章样式表，保持与公众号阅读页完全一致，
- * 这样「预览里看到的字形」就等于「读者在微信里看到的字形」。
+ * 微信文章结构规范 §3 的默认字体栈（2026-10-28 核对）。
+ * 本地预览显式使用同一顺序；mp-quote 不可用时由系统字体回退。
+ * 代码块另用等宽字体，避免破坏源码与字符图的对齐。
  */
 export const WECHAT_FONT_FAMILY =
-  'system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", ' +
+  '"mp-quote", "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", ' +
   '"Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif'
 
 /** 等宽字体栈，优先 macOS / Windows 上程序员常装的字体。 */
@@ -15,7 +15,7 @@ export const MONO_FONT_FAMILY =
   '"Liberation Mono", "Courier New", monospace'
 
 /**
- * 默认排版基线，取自微信公众号官方正文样式：
+ * 默认排版基线，取自用户参考文章（不是微信强制的排版值）：
  * 17px / 1.8 / rgba(0,0,0,0.9) / 两端对齐 / 段距 24px。
  */
 export const DEFAULT_BASE: ThemeBase = {

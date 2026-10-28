@@ -68,7 +68,7 @@ const processor = unified()
  *          → 主题样式内联 → 外层 section 包裹 → HTML 字符串
  *
  * 预览与「复制富文本」调用的是同一个函数，仅 withLineMarkers 不同，
- * 因此「所见」与「所得」在实现层面就是同一份产物。
+ * 两者使用同一套结构和内联样式；微信端仍可能清洗 HTML 或调整颜色。
  */
 export function renderMarkdown(markdown: string, options: RenderOptions): RenderResult {
   const { theme } = options
@@ -95,7 +95,7 @@ export function renderMarkdown(markdown: string, options: RenderOptions): Render
 
   applyInlineStyles(tree, theme)
 
-  // 最外层 section 承载正文字体/字号/行高，微信会完整保留 section 上的 style
+  // 最外层 section 承载正文字体/字号/行高；关键块级元素另有显式样式。
   const container = el(
     'section',
     { style: serializeStyle(theme.styles.container) },

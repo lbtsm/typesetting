@@ -71,8 +71,16 @@ export function applyAutoSpacing(tree: Root): void {
 /**
  * 代码块高亮。
  *
- * 产出结构（外层 section 负责横向滚动，微信对 section 上的 overflow 支持比 pre 稳）：
- *   <section data-sk="preWrap"><pre data-sk="pre"><code data-sk="code">…</code></pre></section>
+ * 产出结构照搬微信原生代码块——每个源码行一个块级 <code>，空行 <code><br></code>：
+ *   <section data-ignore-width data-sk="preWrap">
+ *     <pre data-sk="pre"><code data-sk="codeLine">行1</code><code data-sk="codeLine">行2</code></pre>
+ *   </section>
+ *
+ * 避免依赖「inline 行 + 裸 \n 字符」：粘贴清洗可能折叠换行。
+ * 块级 code 的换行由结构本身表达，不依赖换行字符。
+ *
+ * 外层 section 负责横向滚动，并带 data-ignore-width——微信文章结构规范（1.4.4）
+ * 明确让横向滚动容器用它豁免宽度检查。
  *
  * @returns 文中出现过的语言，供上层按需懒加载语法
  */
@@ -93,7 +101,7 @@ export function highlightCodeBlocks(tree: Root, theme: Theme): string[] {
     // Tab 在微信里宽度不可控，统一展开成 4 个空格，保证缩进一定正确
     const source = textContent(codeNode).replace(/\n$/, '').replace(/\t/g, '    ')
 
-    let content: ElementContent[] | null = null
+    let lines: Element[] | null = null
     let colors = fallbackColors
 
     if (highlighter && isLangReady(lang)) {
@@ -105,7 +113,7 @@ export function highlightCodeBlocks(tree: Root, theme: Theme): string[] {
         const shikiCode = shikiPre && elementChildren(shikiPre)[0]
         if (shikiCode) {
           colors = readShikiColors(shikiPre) ?? colors
-          content = normalizeCodeContent(shikiCode.children, colors.fg)
+          lines = shikiLinesToCode(shikiCode.children, colors.fg)
         }
       } catch (error) {
         console.error('[md2wechat] 代码高亮失败，退化为纯文本：', lang, error)
@@ -113,15 +121,16 @@ export function highlightCodeBlocks(tree: Root, theme: Theme): string[] {
     }
 
     // 高亮器尚未就绪、语言缺失或高亮抛错时，自己拼出与高亮路径完全相同的结构
-    content ??= buildPlainCodeContent(source, colors.fg)
+    lines ??= plainLinesToCode(source, colors.fg)
 
     const pre = withSlot(
-      el('pre', { style: `background: ${colors.bg}; color: ${colors.fg}` }, [
-        withSlot(el('code', {}, content), 'code'),
-      ]),
+      el('pre', { style: `background: ${colors.bg}; color: ${colors.fg}` }, lines),
       'pre',
     )
-    const wrapper = withSlot(el('section', { style: `background: ${colors.bg}` }, [pre]), 'preWrap')
+    const wrapper = withSlot(
+      el('section', { dataIgnoreWidth: '', style: `background: ${colors.bg}` }, [pre]),
+      'preWrap',
+    )
     replaceChild(parent as { children: ElementContent[] }, index, inheritLine(node, wrapper))
     return 'skip'
   })
@@ -129,25 +138,25 @@ export function highlightCodeBlocks(tree: Root, theme: Theme): string[] {
   return Array.from(languages)
 }
 
+/** 构造一个代码行：块级 code，空行放 <br> 撑开高度。 */
+function codeLine(children: ElementContent[]): Element {
+  return withSlot(el('code', {}, children.length > 0 ? children : [el('br')]), 'codeLine')
+}
+
 /**
- * 统一代码块内容的结构：每行一个 line 容器，行内每段文本都包在带 color 的 span 里。
+ * 把 shiki 的输出改造成「每行一个块级 code」。
  *
- * 这不是洁癖，是微信兼容的硬需求。shiki 对 plaintext 不上色，产出的是
- * `<span>` 这种**一个属性都没有的裸标签**；而带语言时每段文本都是
- * `<span style="color:#xxx">`。微信粘贴时会清掉无样式的行内标签，
- * 连带把 ASCII 图依赖的连续空格一起折叠——表现就是「```go 正常、``` 错乱」。
+ * shiki 用 `<span class="line">` 表示一行，行与行之间夹着 `\n` 文本节点。
+ * 这里只取 line 元素、丢掉 `\n`，换行完全由块级结构表达。
  *
- * 所以这里把无语言的产物拉成和带语言完全一样的形状：
- * 有内容的裸 span 补上主题前景色，空的裸 span 直接删掉
- * （带语言时 shiki 对空行本来就不生成内层 span）。
+ * 同时统一 token 的形状：shiki 对 plaintext 不上色，产出的是一个属性都没有的裸 `<span>`，
+ * 而带语言时每段文本都是 `<span style="color:#xxx">`。微信粘贴时会清掉无样式的行内标签，
+ * 连带折叠 ASCII 图依赖的连续空格，所以有内容的裸 span 补上前景色，空的直接删掉。
  */
-function normalizeCodeContent(nodes: ElementContent[], fg: string): ElementContent[] {
-  for (const node of nodes) {
-    if (!isElement(node) || !classList(node).includes('line')) continue
-    withSlot(node, 'codeLine')
-    node.children = node.children.flatMap((token) => normalizeCodeToken(token, fg))
-  }
+function shikiLinesToCode(nodes: ElementContent[], fg: string): Element[] {
   return nodes
+    .filter((node): node is Element => isElement(node) && classList(node).includes('line'))
+    .map((line) => codeLine(line.children.flatMap((token) => normalizeCodeToken(token, fg))))
 }
 
 function normalizeCodeToken(node: ElementContent, fg: string): ElementContent[] {
@@ -161,15 +170,10 @@ function normalizeCodeToken(node: ElementContent, fg: string): ElementContent[] 
 }
 
 /** 高亮不可用时的兜底，手工拼出与高亮路径一致的行结构。 */
-function buildPlainCodeContent(source: string, fg: string): ElementContent[] {
-  const out: ElementContent[] = []
-  source.split('\n').forEach((line, index) => {
-    // 行与行之间保留真实换行符，配合 white-space: pre 换行
-    if (index > 0) out.push(text('\n'))
-    const children = line ? [el('span', { style: `color: ${fg}` }, [text(line)])] : []
-    out.push(withSlot(el('span', {}, children), 'codeLine'))
-  })
-  return out
+function plainLinesToCode(source: string, fg: string): Element[] {
+  return source
+    .split('\n')
+    .map((line) => codeLine(line ? [el('span', { style: `color: ${fg}` }, [text(line)])] : []))
 }
 
 /** 从 shiki 生成的 <pre> 的 style 里读出背景色与前景色。 */
@@ -349,7 +353,8 @@ export function wrapListItemContent(tree: Root): void {
 export function wrapTables(tree: Root): void {
   visit(tree, 'element', (node, index, parent) => {
     if (node.tagName !== 'table' || !parent || index === undefined) return
-    const wrapper = withSlot(el('section', {}, [node]), 'tableWrap')
+    // 只豁免有意提供横向滚动的表格子树，不给整篇正文放行宽度检查。
+    const wrapper = withSlot(el('section', { dataIgnoreWidth: '' }, [node]), 'tableWrap')
     replaceChild(parent as { children: ElementContent[] }, index, inheritLine(node, wrapper))
     return 'skip'
   })

@@ -21,8 +21,8 @@ function tableCell(b: ThemeBase): StyleMap {
  * 1. **关键属性在每个块级元素上重复写一遍**（font-size / line-height / color /
  *    text-align）。微信编辑器在粘贴时会重排 DOM，外层 section 上的继承并不可靠，
  *    重复声明是让样式稳定落地的唯一办法。
- * 2. **只用微信白名单内的属性**：避免 position / float / transform / box-shadow /
- *    伪元素，这些粘贴后一律会被清理掉。
+ * 2. **优先使用简单的文档流布局**：避免定位、浮动或变形造成视觉顺序与 DOM
+ *    顺序不一致，减少粘贴重排和深色模式转换时的差异（结构规范 §4.2.2）。
  */
 export function createStyles(b: ThemeBase): ThemeStyles {
   /** 正文继承的基础排版，供块级元素复用 */
@@ -185,13 +185,10 @@ export function createStyles(b: ThemeBase): ThemeStyles {
     //     word-wrap: break-word !important;
     //   }
     //
-    // 它会把超宽的代码行压回正文列宽，再按 break-word 强行断开——ASCII 图就此错行。
-    // 微信给自己的代码块开了豁免（`.code-snippet__fix * { max-width: 1000% !important }`），
-    // 我们没有那个 class，只能靠**行内 !important**：在 CSS 层叠里，
-    // style 属性上的 !important 优先级高于样式表里的 !important，正好把这两条顶回去。
-    //
-    // 顶回去之后还要让滚动范围正确：给 code 一个 max-content 宽度，
-    // 否则 code 只有容器那么宽，pre 滚不到最长那一行的末尾。
+    // 这些是之前阅读页中观察到的限制，并非粘贴白名单的完整约定。
+    // 行内 !important 用于抵抗样式覆盖，但清洗器是否保留取决于微信端。
+    // 每行一个块级 code 保持换行；pre 自身提供横向滚动（结构规范 §1.8）。
+    // data-ignore-width 只影响宽度检测，不会修改计算样式或自动开启滚动。
     preWrap: {
       margin: b.blockMargin,
       'overflow-x': 'auto',
@@ -213,7 +210,9 @@ export function createStyles(b: ThemeBase): ThemeStyles {
       'letter-spacing': '0',
       'text-align': 'left',
     },
-    code: {
+    // 每个源码行一个块级 code（与微信原生代码块同构），换行由结构表达，不依赖 \n 字符。
+    // 不强制内容宽度；超长的行由 pre 的横向滚动承接。
+    codeLine: {
       'font-family': b.codeFontFamily,
       'font-size': b.codeFontSize,
       'line-height': b.codeLineHeight,
@@ -222,13 +221,11 @@ export function createStyles(b: ThemeBase): ThemeStyles {
       'word-break': 'normal !important',
       'max-width': 'none !important',
       display: 'block',
-      width: 'max-content',
-      'min-width': '100%',
       background: 'none',
       padding: '0',
+      margin: '0',
       'letter-spacing': '0',
     },
-    codeLine: { display: 'inline', 'white-space': 'pre !important' },
 
     // ---- 表格 ----
     tableWrap: { margin: b.blockMargin, 'overflow-x': 'auto' },
