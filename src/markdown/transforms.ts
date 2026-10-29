@@ -123,12 +123,31 @@ export function highlightCodeBlocks(tree: Root, theme: Theme): string[] {
     // 高亮器尚未就绪、语言缺失或高亮抛错时，自己拼出与高亮路径完全相同的结构
     lines ??= plainLinesToCode(source, colors.fg)
 
+    // 套上微信原生代码块的 class（结构取自参考文章）。粘贴后若 class 得以保留，
+    // 微信自己的 CSS 会接管不折行与横向滚动；若被删，行内样式兜底，效果退回现状。
+    // dataWxClass 是内部标记，applyInlineStyles 清掉其他 class 之后会把它还原成 class。
     const pre = withSlot(
-      el('pre', { style: `background: ${colors.bg}; color: ${colors.fg}` }, lines),
+      el(
+        'pre',
+        {
+          dataWxClass: 'code-snippet__js',
+          dataLang: lang === 'text' ? 'plaintext' : lang,
+          style: `background: ${colors.bg}; color: ${colors.fg}`,
+        },
+        lines,
+      ),
       'pre',
     )
     const wrapper = withSlot(
-      el('section', { dataIgnoreWidth: '', style: `background: ${colors.bg}` }, [pre]),
+      el(
+        'section',
+        {
+          dataWxClass: 'code-snippet__fix code-snippet__js',
+          dataIgnoreWidth: '',
+          style: `background: ${colors.bg}`,
+        },
+        [pre],
+      ),
       'preWrap',
     )
     replaceChild(parent as { children: ElementContent[] }, index, inheritLine(node, wrapper))

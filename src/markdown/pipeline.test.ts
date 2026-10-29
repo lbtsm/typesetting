@@ -109,7 +109,7 @@ describe('渲染管线', () => {
   })
 
   it('代码块是 pre > code 结构、带横向滚动外壳与高亮', () => {
-    expect(html).toMatch(/<section data-ignore-width="" style="[^"]*"><pre style="[^"]*"><code style="[^"]*">/)
+    expect(html).toMatch(/<section [^>]*data-ignore-width="" style="[^"]*"><pre [^>]*style="[^"]*"><code style="[^"]*">/)
     expect(html).toContain('overflow-x: auto')
     expect(html).toContain('white-space: pre')
     // shiki 的 token 颜色是内联的
@@ -137,7 +137,9 @@ describe('渲染管线', () => {
   })
 
   it('所有 class 属性都被清除（微信不认 class）', () => {
-    expect(html).not.toContain('class=')
+    // 唯一例外：微信原生代码块的 class，见「代码块套用微信原生结构」
+    const classes = Array.from(html.matchAll(/class="([^"]*)"/g), (m) => m[1].split(' ')).flat()
+    expect(classes.every((name) => name.startsWith('code-snippet'))).toBe(true)
   })
 
   it('不注入 data-line 时输出里没有行号属性', () => {
@@ -404,7 +406,7 @@ describe('代码块按行输出块级 code', () => {
 
   it('滚动容器带 data-ignore-width，且不用 max-content', () => {
     const { html: out } = renderMarkdown(md, options())
-    expect(out).toMatch(/<section data-ignore-width="" style="[^"]*overflow-x: auto/)
+    expect(out).toMatch(/<section [^>]*data-ignore-width="" style="[^"]*overflow-x: auto/)
     expect(out).not.toContain('max-content')
   })
 
@@ -413,6 +415,45 @@ describe('代码块按行输出块级 code', () => {
     expect(out).toMatch(/<section data-ignore-width="" style="[^"]*overflow-x: auto[^"]*"><table/)
     expect(out).toMatch(/^<section style=/)
     expect(out.match(/data-ignore-width/g)).toHaveLength(1)
+  })
+})
+
+/**
+ * 回归：长代码行在手机上折行（不横向滚动），ASCII 图错位。
+ *
+ * 多轮现象都指向微信粘贴时丢掉我们写的 white-space（空格转 &nbsp;、裸 \n 被吞、
+ * pre !important 照样折行）。微信原生代码块靠自己的 CSS 不折行并横向滚动：
+ *   .code-snippet__fix code { white-space: pre }
+ *   .code-snippet__fix pre  { overflow-x: auto }
+ *   .code-snippet__fix *    { max-width: 1000% !important }
+ * 所以套上原生 class，行内样式原样保留——class 被删也只是退回现状。
+ */
+describe('代码块套用微信原生结构', () => {
+  const md = '```go\nfunc main() {}\n```'
+
+  it('外层 section 带 code-snippet__fix code-snippet__js', () => {
+    const { html: out } = renderMarkdown(md, options())
+    expect(out).toMatch(/<section class="code-snippet__fix code-snippet__js"[^>]*style="[^"]*overflow-x: auto/)
+  })
+
+  it('pre 带 code-snippet__js 与 data-lang', () => {
+    const { html: out } = renderMarkdown(md, options())
+    expect(out).toMatch(/<pre class="code-snippet__js" data-lang="go" style="/)
+  })
+
+  it('无语言代码块 data-lang 为 plaintext', () => {
+    const { html: out } = renderMarkdown('```\nascii\n```', options())
+    expect(out).toContain('data-lang="plaintext"')
+  })
+
+  it('行内样式仍然保留，class 被删时退回现状', () => {
+    const { html: out } = renderMarkdown(md, options())
+    expect(out).toMatch(/<code style="[^"]*white-space: pre !important[^"]*display: block/)
+  })
+
+  it('行内代码与其他元素不带 class', () => {
+    const { html: out } = renderMarkdown('正文 `inline` **粗体**', options())
+    expect(out).not.toContain('class=')
   })
 })
 
@@ -462,7 +503,7 @@ describe('代码块结构一致性', () => {
     expect(out).toContain('white-space: pre !important')
     expect(out).not.toContain('width: max-content')
     // 不能只有外层 section 滚动：规范 §1.8 检查 pre 的计算样式。
-    expect(out).toMatch(/<pre style="[^"]*overflow-x: auto/)
+    expect(out).toMatch(/<pre [^>]*style="[^"]*overflow-x: auto/)
     expect(out).toContain('-webkit-overflow-scrolling: touch')
   })
 
@@ -470,7 +511,7 @@ describe('代码块结构一致性', () => {
     const { html: out } = renderMarkdown('```go\nfunc main() {}\n```', options())
     expect(out).toContain('max-width: none !important')
     expect(out).not.toContain('width: max-content')
-    expect(out).toMatch(/<pre style="[^"]*overflow-x: auto/)
+    expect(out).toMatch(/<pre [^>]*style="[^"]*overflow-x: auto/)
   })
 
   it('无语言与带语言产出的行结构完全一致', () => {

@@ -72,7 +72,11 @@ describe('App 冒烟', () => {
     expect(paragraph?.getAttribute('style')).toContain('line-height: 1.8')
 
     // 预览区的正文里不应出现任何 class（微信不认 class）
-    expect(article.innerHTML).not.toContain('class=')
+    // 唯一例外是微信原生代码块的 class（code-snippet__*），交给微信自己的 CSS 接管
+    const classes = Array.from(article.querySelectorAll('[class]'), (node) =>
+      Array.from(node.classList),
+    ).flat()
+    expect(classes.every((name) => name.startsWith('code-snippet'))).toBe(true)
     // 代码块高亮的 token 颜色是内联的
     expect(article.querySelector('pre')?.getAttribute('style')).toContain('white-space: pre')
   })

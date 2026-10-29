@@ -34,7 +34,12 @@ function expectSourceSurvives(body: HTMLElement) {
   expect(pre?.children).toHaveLength(lines.length)
   // 文本里的尖括号和 & 经过完整 HTML 导出仍是文本，不会生成标签。
   expect(pre?.querySelectorAll('script, img')).toHaveLength(0)
-  expect(body.querySelectorAll('[data-sk], [class], [data-line]')).toHaveLength(0)
+  // class 只允许微信原生代码块的 code-snippet__*（交给微信自己的 CSS 处理不折行与横向滚动）
+  expect(
+    Array.from(body.querySelectorAll('[class]')).flatMap((node) => Array.from(node.classList))
+      .every((name) => name.startsWith('code-snippet')),
+  ).toBe(true)
+  expect(body.querySelectorAll('[data-sk], [data-line]')).toHaveLength(0)
 }
 
 describe('微信 HTML 导出兼容回归', () => {

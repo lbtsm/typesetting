@@ -99,12 +99,16 @@ export function applyInlineStyles(tree: Root, theme: Theme): void {
 
     for (const key of DROPPED_PROPERTIES) delete properties[key]
     delete properties.dataSk
+    delete properties.style
 
-    if (serialized) {
-      properties.style = serialized
-    } else {
-      delete properties.style
+    // 唯一保留的 class：转换阶段用 dataWxClass 标记的微信原生代码块 class。
+    // 放在属性最前面，输出形如 <pre class="code-snippet__js" data-lang="go" style="…">。
+    const wxClass = properties.dataWxClass
+    delete properties.dataWxClass
+    node.properties = {
+      ...(typeof wxClass === 'string' ? { className: wxClass.split(' ') } : {}),
+      ...properties,
+      ...(serialized ? { style: serialized } : {}),
     }
-    node.properties = properties
   })
 }
